@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# Oppdater repositories og installer pip, sshpass og ansible.
+# Sliter med at det kommer en interaktiv del som jeg ikk har fått til å ignoerere.
+sudo apt update -y
+sudo apt install python3-pip -y
+python3 -m pip install --user ansible
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
+source ~/.bashrc
+python3 -m pip install --user passlib
+
+# har ikke fått fjernet den interaktive delen med at man må skrive yes enda.
+ssh-keygen -t ed25519 -C "ansible-controller"
+ssh-copy-id adminuser2@10.0.2.4
+
+#Lag mappeopsettet og konfig filer for ansible.
+mkdir ansible
+cd ansible
+mkdir playbooks
+touch ansible.cfg
+cat << EOF > ansible.cfg
+[defaults]
+inventory = ./hosts
+EOF
+
+touch hosts
+cat << EOF > hosts
+# Linux hosts
+[ubuntu]
+Linux-02 ansible_host=10.0.2.4 ansible_user=adminuser2
+EOF
+
+# Lag playbook for å legge til gruppen og brukerene
+cat << EOF > playbooks/usersNgroups.yaml
+---
+- name: Administrere brukere, grupper og rettigheter på ubuntu klienter
+  hosts: ubuntu
+  become: true
+
+  tasks:
+
+# Legge til grupper
+    - name: Gruppe "terraform"
+      ansible.builtin.group:
+        name: terraform
+        state: present
+
+# Administrere brukere
+    - name: Bruker "bruker1"
+      ansible.builtin.user:
+        name: bruker1
+        state: present
+        password: "{{ 'passord123' | password_hash('sha512') }}"
+        append: true
+        groups: [terraform]
+        remove: false
+
+# Administrere brukere
+    - name: Bruker "bruker2"
+      ansible.builtin.user:
+        name: bruker2
+        state: present
+        password: "{{ 'passord123' | password_hash('sha512') }}"
+        append: true
+        groups: [terraform]
+        remove: false
+
+EOF
+
+# Lag playbook for å instalere/avinstallere programmer
+cat << EOF > playbooks/install_programs.yaml
+---
+- name: Installere og slette programmer på ubuntu klienter ved hjelp av apt
+  hosts: ubuntu
+  become: true
+
+  tasks:
+
+# Oppdattere og installere pakker
+    - name: Oppdatere pakker så lenge update_cache er mer enn 3600 sekunder gammel
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+# Installere/slette programmer
+    - name: Administrere pakken "cowsay"
+      ansible.builtin.apt:
+        name: cowsay
+        state: present
+
+EOF
