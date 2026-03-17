@@ -1,2 +1,2 @@
-# Ansible-emnet
-Forskjellig som er tilknyttet emnet ansible
+# Azure-emnet
+Forskjellig som er tilknyttet emnet azure
