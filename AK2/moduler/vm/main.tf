@@ -26,7 +26,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
     name                = var.vm_names[count.index]
     resource_group_name = var.rg_name
     location            = var.location
-    size                = "Standard_B2ats_v2"
+    size                = var.size
     admin_username      = var.vm_admin_username
     admin_password      = var.vm_admin_password
     network_interface_ids = [
