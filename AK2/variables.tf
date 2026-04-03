@@ -2,7 +2,7 @@
 variable "subscription_id" {
 	description = "Subscription ID"
 	type        = string
-	#default	  = "4e57f55e-321b-4b84-8bc8-99cb86a0af29"
+	#default	  = "REMOVED"
 	#Hvis default ikke er satt henter den fra terraform.tfvars
 }
 

@@ -1,6 +1,6 @@
 
 # Provider og autentiseringsdetaljer
-subscription_id = "4e57f55e-321b-4b84-8bc8-99cb86a0af29"
+subscription_id = "REMOVED"
 location = "France Central"
 
 # Ressursgruppenavn
