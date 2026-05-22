@@ -1,0 +1,109 @@
+#cloud-config
+package_update: true
+
+packages:
+  - python3
+  - python3-pip
+  - python3-venv
+  - python3-dev
+  - build-essential
+  - curl
+  - gnupg
+  - unixodbc
+  - unixodbc-dev
+  - git
+  - cifs-utils
+
+runcmd:
+  - curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft-prod.gpg
+  - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" > /etc/apt/sources.list.d/mssql-release.list
+  - apt update
+  - ACCEPT_EULA=Y apt install -y msodbcsql18
+
+  # Hent appen
+  - git clone https://github.com/3vax/prosjektoppgave-skytjeneste.git /opt/ecommerce
+
+  # Monter Azure Files app-media share
+  - mkdir -p /mnt/app-media
+  - mkdir -p /etc/smbcredentials
+  - |
+    cat > /etc/smbcredentials/${storage_account_name}.cred << EOF
+    username=${storage_account_name}
+    password=${storage_account_key}
+    EOF
+  - chmod 600 /etc/smbcredentials/${storage_account_name}.cred
+  - |
+    echo "//${storage_account_name}.file.core.windows.net/${app_media_share} /mnt/app-media cifs nofail,_netdev,credentials=/etc/smbcredentials/${storage_account_name}.cred,serverino,nosharesock,actimeo=30,vers=3.0,dir_mode=0775,file_mode=0664" >> /etc/fstab
+  - |
+    mount -a
+    if ! mountpoint -q /mnt/app-media; then
+      echo "ERROR: /mnt/app-media is not mounted"
+      exit 1
+    fi
+
+  # Kopier eksisterende standardbilder første gang
+  - |
+    if [ -z "$(ls -A /mnt/app-media)" ]; then
+      echo "app-media share is empty. Copying default images..."
+      cp -a /opt/ecommerce/static/images/. /mnt/app-media/
+    else
+      echo "app-media share already contains files. Skipping default image copy."
+    fi
+
+  # Sett opp Python-miljø
+  - cd /opt/ecommerce && python3 -m venv venv
+  - cd /opt/ecommerce && ./venv/bin/pip install --upgrade pip setuptools wheel
+  - cd /opt/ecommerce && ./venv/bin/pip install -r requirements.txt
+
+  # Kjør migrations
+  - cd /opt/ecommerce && DB_NAME=ecommerce DB_USER=CHANGE_DB_USER DB_PASSWORD='CHANGE_DB_PASSWORD' DB_HOST=CHANGE_SQL_SERVER.database.windows.net DB_PORT=1433 ./venv/bin/python manage.py migrate
+
+  # Legg inn initial data
+  - |
+    cd /opt/ecommerce
+    export DB_NAME=ecommerce
+    export DB_USER=CHANGE_DB_USER
+    export DB_PASSWORD='CHANGE_DB_PASSWORD'
+    export DB_HOST=CHANGE_SQL_SERVER.database.windows.net
+    export DB_PORT=1433
+
+    PRODUCT_COUNT=$(./venv/bin/python manage.py shell -c "from store.models import Product; print(Product.objects.count())")
+
+    if [ "$PRODUCT_COUNT" = "0" ]; then
+      echo "Database is empty. Loading initial data..."
+      ./venv/bin/python manage.py loaddata initial_data.json
+    else
+      echo "Database already contains products. Skipping initial data."
+    fi
+
+    ./venv/bin/python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); user, created = User.objects.get_or_create(username='admin', defaults={'email':'admin@example.com'}); user.set_password('CHANGE_ADMIN_PASSWORD'); user.is_staff=True; user.is_superuser=True; user.is_active=True; user.save(); print('Admin user ready')"
+
+# Legge til statiske filer
+  - cd /opt/ecommerce && DB_NAME=ecommerce DB_USER=CHANGE_DB_USER DB_PASSWORD='CHANGE_DB_PASSWORD' DB_HOST=CHANGE_SQL_SERVER.database.windows.net DB_PORT=1433 ./venv/bin/python manage.py collectstatic --noinput
+
+  # Lag systemd-service
+  - |
+    cat > /etc/systemd/system/ecommerce.service << 'EOF'
+    [Unit]
+    Description=Ecommerce Django App
+    After=network.target
+
+    [Service]
+    WorkingDirectory=/opt/ecommerce
+    Environment="DB_NAME=ecommerce"
+    Environment="DB_USER=CHANGE_DB_USER"
+    Environment="DB_PASSWORD=CHANGE_DB_PASSWORD"
+    Environment="DB_HOST=CHANGE_SQL_SERVER.database.windows.net"
+    Environment="DB_PORT=1433"
+    Environment="ALLOWED_HOSTS=*"
+    ExecStart=/opt/ecommerce/venv/bin/gunicorn eCommerce.wsgi:application --bind 0.0.0.0:80 --workers 2 --threads 4 --timeout 120
+    Restart=always
+    User=root
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+  - systemctl daemon-reload
+  - systemctl enable ecommerce
+  - systemctl start ecommerce
